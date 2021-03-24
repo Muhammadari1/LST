@@ -1,0 +1,88 @@
+function maskL8sr(image) {
+  var cloudShadowBitMask = (1 << 3);
+  var cloudsBitMask = (1 << 5);
+  var qa = image.select('pixel_qa');
+  var mask = qa.bitwiseAnd(cloudShadowBitMask).eq(0)
+                 .and(qa.bitwiseAnd(cloudsBitMask).eq(0));
+  return image.updateMask(mask);
+}
+var col = ee.ImageCollection('LANDSAT/LC08/C01/T1_SR')
+.map(maskL8sr)
+.filterDate('2014-08-01', '2014-09-30')
+.filterBounds(SHP);
+}
+var imagelst = col.median().clip(SHP);
+var ndvii = imagelst.normalizedDifference(['B5', 'B4']).rename('NDVI_LST');
+var thermal= imagelst.select('B10').multiply(0.1);
+
+//find the minimum and maximum number on NDVI
+{
+var min = ee.Number(ndvii.reduceRegion({
+   reducer: ee.Reducer.min(),
+   geometry: SHP,
+   scale: 30,
+   maxPixels: 1e9
+   }).values().get(0));
+print(min, 'min');
+var max = ee.Number(ndvii.reduceRegion({
+    reducer: ee.Reducer.max(),
+   geometry: SHP,
+   scale: 30,
+   maxPixels: 1e9
+   }).values().get(0));
+print(max, 'max')
+}
+
+/fractional vegetation
+{
+var fv = ndvii.subtract(min).divide(max.subtract(min)).rename('FV'); 
+print(fv, 'fv');
+
+  var a= ee.Number(0.004);
+  var b= ee.Number(0.986);
+  var EM=fv.multiply(a).add(b).rename('EMM');
+  
+  var LST = thermal.expression(
+    '(Tb/(1 + (0.001145* (Tb / 1.438))*log(Ep)))-273.15', {
+      'Tb': thermal.select('B10'),
+      'Ep': EM.select('EMM')
+});
+print(LST, 'LST')
+var histogram = ui.Chart.image.histogram({
+  image: LST,
+  region: SHP,
+  scale: 30,
+  maxBuckets:1000,
+  minBucketWidth:0.01
+});
+histogram.setOptions({
+  title: 'Histogram LST'
+});
+
+print(histogram, 'Kurva LST basah agustus 2014');
+
+var min = ee.Number(LST.reduceRegion({
+   reducer: ee.Reducer.min(),
+   geometry: SHP,
+   scale: 30,
+   maxPixels: 1e9
+   }).values().get(0));
+print(min, 'min');
+var max = ee.Number(LST.reduceRegion({
+    reducer: ee.Reducer.max(),
+   geometry: SHP,
+   scale: 30,
+   maxPixels: 1e9
+   }).values().get(0));
+print(max, 'max')
+var mean = ee.Number(LST.reduceRegion({
+    reducer: ee.Reducer.mean(),
+   geometry: SHP,
+   scale: 30,
+   maxPixels: 1e9
+   }).values().get(0));
+print(mean, 'mean')
+}
+
+Map.centerObject(SHP, 12);
+Map.addLayer(LST.clip(SHP), {min: 15, max: 32, palette: ['white', 'red']},'LST', false);
